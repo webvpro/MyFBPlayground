@@ -1,6 +1,6 @@
 {
   "name": "angularfire",
-  "version": "0.7.0",
+  "version": "0.6.0",
   "description": "An officially supported AngularJS binding for Firebase.",
   "main": "angularfire.js",
   "repository": {
@@ -18,7 +18,6 @@
     "grunt-contrib-jshint": "~0.6.2",
     "grunt-karma": "~0.6.2",
     "grunt-exec": "~0.4.2",
-    "grunt-conventional-changelog": "~1.0.0",
     "load-grunt-tasks": "~0.2.0",
     "karma-jasmine": "~0.1.3",
     "karma-script-launcher": "~0.1.0",

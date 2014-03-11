@@ -11,5 +11,9 @@ angular.module('MyFBPlaygroundApp')
         $scope.err = err? err + '' : null;
       });
     };
+        $scope.logout = function(service) {
+            simpleLogin.logout();
+        };
+
 
   });

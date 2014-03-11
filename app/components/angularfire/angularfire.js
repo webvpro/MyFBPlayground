@@ -5,7 +5,7 @@
 // as normal, except that the changes are also sent to all other clients
 // instead of just a server.
 //
-//      AngularFire 0.7.0
+//      AngularFire 0.6.0
 //      http://angularfire.com
 //      License: MIT
 
@@ -39,33 +39,38 @@
   // for more info see: https://www.firebase.com/docs/ordered-data.html
   angular.module("firebase").filter("orderByPriority", function() {
     return function(input) {
-      var sorted = [];
-      if (input) {
-        if (!input.$getIndex || typeof input.$getIndex != "function") {
-          // input is not an angularFire instance
-          if (angular.isArray(input)) {
-            // If input is an array, copy it
-            sorted = input.slice(0);
-          } else if (angular.isObject(input)) {
-            // If input is an object, map it to an array
-            angular.forEach(input, function(prop) {
-              sorted.push(prop);
-            });
-          }
-        } else {
-          // input is an angularFire instance
-          var index = input.$getIndex();
-          if (index.length > 0) {
-            for (var i = 0; i < index.length; i++) {
-              var val = input[index[i]];
-              if (val) {
-                val.$id = index[i];
-                sorted.push(val);
-              }
+      if (!input) {
+        return [];
+      }
+      if (!input.$getIndex || typeof input.$getIndex != "function") {
+        // If input is an object, map it to an array for the time being.
+        var type = Object.prototype.toString.call(input);
+        if (typeof input == "object" && type == "[object Object]") {
+          var ret = [];
+          for (var prop in input) {
+            if (input.hasOwnProperty(prop)) {
+              ret.push(input[prop]);
             }
           }
+          return ret;
+        }
+        return input;
+      }
+
+      var sorted = [];
+      var index = input.$getIndex();
+      if (index.length <= 0) {
+        return input;
+      }
+
+      for (var i = 0; i < index.length; i++) {
+        var val = input[index[i]];
+        if (val) {
+          val.$id = index[i];
+          sorted.push(val);
         }
       }
+
       return sorted;
     };
   });
@@ -115,7 +120,6 @@
 
     // An object storing handlers used for different events.
     this._on = {
-      value: [],
       change: [],
       loaded: [],
       child_added: [],
@@ -138,24 +142,19 @@
       var self = this;
       var object = {};
 
-      // Set the $id val equal to the Firebase reference's name() function.
-      object.$id = self._fRef.ref().name();
-
       // Establish a 3-way data binding (implicit sync) with the specified
       // Firebase location and a model on $scope. To be used from a controller
-      // to automatically synchronize *all* local changes. It takes three
+      // to automatically synchronize *all* local changes. It take two
       // arguments:
       //
-      //    * `$scope`   : The scope with which the bound model is associated.
-      //    * `name`     : The name of the model.
-      //    * `defaultFn`: A function that provides a default value if the
-      //                   remote value is not set. Optional.
+      //    * `$scope`: The scope with which the bound model is associated.
+      //    * `name`  : The name of the model.
       //
-      // This function also returns a promise, which, when resolved, will be
+      // This function also returns a promise, which when resolve will be
       // provided an `unbind` method, a function which you can call to stop
       // watching the local model for changes.
-      object.$bind = function(scope, name, defaultFn) {
-        return self._bind(scope, name, defaultFn);
+      object.$bind = function(scope, name) {
+        return self._bind(scope, name);
       };
 
       // Add an object to the remote data. Adding an object is the
@@ -231,28 +230,7 @@
       // data has been successfully saved to the server.
       object.$set = function(newValue) {
         var deferred = self._q.defer();
-        self._fRef.ref().set(self._parseObject(newValue), function(err) {
-          if (err) {
-            deferred.reject(err);
-          } else {
-            deferred.resolve();
-          }
-        });
-        return deferred.promise;
-      };
-
-      // Non-destructively update only a subset of keys for the current object.
-      // This is the equivalent of calling `update()` on a Firebase reference.
-      // Takes a single mandatory argument:
-      //
-      //    * `newValue`: The set of keys and values that must be updated for
-      //                  this location.
-      //
-      // This function returns a promise that will be resolved when the data
-      // has been successfully saved to the server.
-      object.$update = function(newValue) {
-        var deferred = self._q.defer();
-        self._fRef.ref().update(self._parseObject(newValue), function(err) {
+        self._fRef.ref().set(newValue, function(err) {
           if (err) {
             deferred.reject(err);
           } else {
@@ -357,12 +335,13 @@
           self._timeout(function() {
             callback();
           });
-        } else if (self._on.hasOwnProperty(type)) {
+          return;
+        }
+        if (self._on.hasOwnProperty(type)) {
           self._on[type].push(callback);
         } else {
           throw new Error("Invalid event type " + type + " specified");
         }
-        return object;
       };
 
       // Detach an event handler from a specified event type. If no callback
@@ -410,11 +389,6 @@
         return angular.copy(self._index);
       };
 
-      // Return the reference used by this object.
-      object.$getRef = function() {
-        return self._fRef.ref();
-      };
-
       self._object = object;
       self._getInitialValue();
 
@@ -451,12 +425,6 @@
           }
         }
 
-        // Call handlers for the "loaded" event.
-        if (self._loaded !== true) {
-          self._loaded = true;
-          self._broadcastEvent("loaded", value);
-        }
-
         switch (typeof value) {
         // For primitive values, simply update the object returned.
         case "string":
@@ -466,16 +434,16 @@
           break;
         // For arrays and objects, switch to child methods.
         case "object":
-          self._fRef.off("value", gotInitialValue);
-          // Before switching to child methods, save priority for top node.
-          if (snapshot.getPriority() !== null) {
-            self._updateModel("$priority", snapshot.getPriority());
-          }
           self._getChildValues();
+          self._fRef.off("value", gotInitialValue);
           break;
         default:
           throw new Error("Unexpected type from remote data " + typeof value);
         }
+
+        // Call handlers for the "loaded" event.
+        self._loaded = true;
+        self._broadcastEvent("loaded", value);
       };
 
       self._fRef.on("value", gotInitialValue);
@@ -620,7 +588,7 @@
     // This function creates a 3-way binding between the provided scope model
     // and Firebase. All changes made to the local model are saved to Firebase
     // and changes to the remote data automatically appear on the local model.
-    _bind: function(scope, name, defaultFn) {
+    _bind: function(scope, name) {
       var self = this;
       var deferred = self._q.defer();
 
@@ -633,7 +601,7 @@
       // If the local model is an object, call an update to set local values.
       var local = self._parse(name)(scope);
       if (local !== undefined && typeof local == "object") {
-        self._fRef.ref().update(self._parseObject(local));
+        self._fRef.update(self._parseObject(local));
       }
 
       // We're responsible for setting up scope.$watch to reflect local changes
@@ -642,10 +610,10 @@
         // If the new local value matches the current remote value, we don't
         // trigger a remote update.
         var local = self._parseObject(self._parse(name)(scope));
-        if (self._object.$value !== undefined &&
+        if (self._object.$value &&
             angular.equals(local, self._object.$value)) {
           return;
-        } else if (angular.equals(local, self._parseObject(self._object))) {
+        } else if (angular.equals(local, self._object)) {
           return;
         }
 
@@ -671,22 +639,12 @@
       // Once we receive the initial value, the promise will be resolved.
       self._fRef.once("value", function(snap) {
         self._timeout(function() {
-          // HACK / FIXME: Objects require a second event loop run, since we
-          // switch from value events to child_added. See #209 on Github.
+          // Objects require a second event loop run, since we switch from
+          // value events to child_added.
           if (typeof snap.val() != "object") {
-            // If the remote value is not set and defaultFn was provided,
-            // initialize the local value with the result of defaultFn().
-            if (snap.val() == null && typeof defaultFn === 'function') {
-              scope[name] = defaultFn();
-            }
             deferred.resolve(unbind);
           } else {
             self._timeout(function() {
-              // If the remote value is not set and defaultFn was provided,
-              // initialize the local value with the result of defaultFn().
-              if (snap.val() == null && typeof defaultFn === 'function') {
-                scope[name] = defaultFn();
-              }
               deferred.resolve(unbind);
             });
           }
@@ -695,6 +653,7 @@
 
       return deferred.promise;
     },
+
 
     // Parse a local model, removing all properties beginning with "$" and
     // converting $priority to ".priority".
@@ -772,8 +731,7 @@
         $createUser: this.createUser.bind(this),
         $changePassword: this.changePassword.bind(this),
         $removeUser: this.removeUser.bind(this),
-        $getCurrentUser: this.getCurrentUser.bind(this),
-        $sendPasswordResetEmail: this.sendPasswordResetEmail.bind(this)
+        $getCurrentUser: this.getCurrentUser.bind(this)
       };
       this._object = object;
 
@@ -822,10 +780,9 @@
 
     // Creates a user for Firebase Simple Login. Function 'cb' receives an
     // error as the first argument and a Simple Login user object as the second
-    // argument. Note that this function only creates the user, if you wish to
-    // log in as the newly created user, call $login() after the promise for
-    // this method has been fulfilled.
-    createUser: function(email, password) {
+    // argument. Set the optional 'noLogin' argument to true if you don't want
+    // the newly created user to also be logged in.
+    createUser: function(email, password, noLogin) {
       var self = this;
       var deferred = this._q.defer();
 
@@ -834,7 +791,15 @@
           self._rootScope.$broadcast("$firebaseSimpleLogin:error", err);
           deferred.reject(err);
         } else {
-          deferred.resolve(user);
+          if (!noLogin) {
+            // Resolve the promise with a new promise for login.
+            deferred.resolve(self.login("password", {
+              email: email,
+              password: password
+            }));
+          } else {
+            deferred.resolve(user);
+          }
         }
       });
 
@@ -894,21 +859,9 @@
     },
 
     // Send a password reset email to the user for an email + password account.
-    sendPasswordResetEmail: function(email) {
-      var self = this;
-      var deferred = this._q.defer();
-
-      self._authClient.sendPasswordResetEmail(email, function(err) {
-        if (err) {
-          self._rootScope.$broadcast("$firebaseSimpleLogin:error", err);
-          deferred.reject(err);
-        } else {
-          deferred.resolve();
-        }
-      });
-
-      return deferred.promise;
-    },
+    // resetPassword: function() {
+    // Stub: Coming soon to Simple Login.
+    //},
 
     // Internal callback for any Simple Login event.
     _onLoginEvent: function(err, user) {
